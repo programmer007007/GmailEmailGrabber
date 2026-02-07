@@ -41,6 +41,9 @@ DB_PATH = DATA_DIR / "app.db"
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 TOKENS_DIR.mkdir(parents=True, exist_ok=True)
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
+BASE_URL = os.getenv("BASE_URL", "http://localhost:5000")
+
 
 app = Flask(__name__)
 app.secret_key = APP_SECRET
@@ -188,10 +191,16 @@ def load_credentials(user_id):
 
 
 def get_flow():
+    # Use hardcoded production URL in production, auto-detect in dev
+    if ENVIRONMENT == "production":
+        redirect_uri = f"{BASE_URL}/oauth2callback"
+    else:
+        redirect_uri = url_for("oauth2callback", _external=True)
+    
     return Flow.from_client_secrets_file(
         GOOGLE_CLIENT_SECRET,
         scopes=SCOPES,
-        redirect_uri=url_for("oauth2callback", _external=True),
+        redirect_uri=redirect_uri,
     )
 
 
