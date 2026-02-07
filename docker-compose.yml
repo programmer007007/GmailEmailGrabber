@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  gmail-grabber:
+    build: .
+    container_name: gmail-mail-grabber
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./data:/app/data
+      - ./tokens:/app/tokens
+      - ./app.db:/app/app.db
+      - ./credentials.json:/app/credentials.json
+    environment:
+      - APP_SECRET=${APP_SECRET:-dev-secret-change-in-production}
+      - ADMIN_USER=${ADMIN_USER:-admin}
+      - ADMIN_PASS=${ADMIN_PASS:-password}
+      - GOOGLE_CLIENT_SECRET_FILE=credentials.json
+      - OAUTHLIB_INSECURE_TRANSPORT=1
+    restart: unless-stopped
