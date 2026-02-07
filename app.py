@@ -328,9 +328,9 @@ def parse_email_body(payload):
 def clean_html_content(html_content):
     """
     Clean and minimize HTML content by:
-    - Removing scripts, styles, and unnecessary tags
-    - Stripping inline styles and most attributes
-    - Keeping only essential structure (headings, paragraphs, links, lists)
+    - Removing scripts, styles, links, and unnecessary tags
+    - Stripping inline styles and attributes
+    - Keeping only essential structure (headings, paragraphs, lists)
     - Extracting readable text content
     """
     if not html_content or not html_content.strip():
@@ -339,21 +339,18 @@ def clean_html_content(html_content):
     try:
         soup = BeautifulSoup(html_content, 'html.parser')
 
-        # Remove unwanted tags completely
-        for tag in soup(['script', 'style', 'meta', 'link', 'noscript', 'iframe', 'embed', 'object']):
+        # Remove unwanted tags completely (including links)
+        for tag in soup(['script', 'style', 'meta', 'link', 'noscript', 'iframe', 'embed', 'object', 'a']):
             tag.decompose()
 
         # Remove comments
         for comment in soup.findAll(text=lambda text: isinstance(text, str) and text.strip().startswith('<!--')):
             comment.extract()
 
-        # Remove all attributes except href for links and src for images
+        # Remove all attributes except src for images
         for tag in soup.find_all(True):
-            # Keep only essential attributes
-            if tag.name == 'a' and tag.has_attr('href'):
-                attrs = {'href': tag['href']}
-                tag.attrs = attrs
-            elif tag.name == 'img' and tag.has_attr('src'):
+            # Keep only essential attributes for images
+            if tag.name == 'img' and tag.has_attr('src'):
                 attrs = {'src': tag['src']}
                 if tag.has_attr('alt'):
                     attrs['alt'] = tag['alt']
@@ -369,15 +366,12 @@ def clean_html_content(html_content):
         cleaned = re.sub(r' +', ' ', cleaned)
 
         # Further minimize: extract just text with basic structure
-        # Option 1: Keep minimal HTML structure (recommended for readability)
         text_parts = []
-        for element in soup.find_all(['p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'a', 'span', 'strong', 'em', 'br']):
+        for element in soup.find_all(['p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'span', 'strong', 'em', 'br']):
             text = element.get_text(strip=True)
             if text:
                 if element.name in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']:
                     text_parts.append(f"\n## {text}\n")
-                elif element.name == 'a' and element.has_attr('href'):
-                    text_parts.append(f"{text} ({element['href']})")
                 elif element.name in ['p', 'div']:
                     text_parts.append(f"{text}\n")
                 elif element.name == 'li':
