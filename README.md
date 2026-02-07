@@ -60,7 +60,7 @@ Create a `.env` file in the project root:
 
 ```bash
 APP_SECRET=your-secret-key-here
-ADMIN_USER=demo-admin
+ADMIN_USER=your-admin
 ADMIN_PASS=your-admin-password
 GOOGLE_CLIENT_SECRET_FILE=credentials.json
 ```
