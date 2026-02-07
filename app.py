@@ -1,3 +1,4 @@
+from werkzeug.middleware.proxy_fix import ProxyFix
 import json
 import os
 import re
@@ -47,6 +48,15 @@ BASE_URL = os.getenv("BASE_URL", "http://localhost:5000")
 
 app = Flask(__name__)
 app.secret_key = APP_SECRET
+
+# Add ProxyFix to make Flask aware of proxy headers
+app.wsgi_app = ProxyFix(
+    app.wsgi_app,
+    x_for=1,
+    x_proto=1,
+    x_host=1,
+    x_prefix=1
+)
 
 # Reduce OAuthlib warning for local dev when using http://localhost
 os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
