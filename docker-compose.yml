@@ -9,7 +9,6 @@ services:
     volumes:
       - ./data:/app/data
       - ./tokens:/app/tokens
-      - ./app.db:/app/app.db
       - ./credentials.json:/app/credentials.json
     environment:
       - APP_SECRET=${APP_SECRET:-dev-secret-change-in-production}

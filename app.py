@@ -37,7 +37,7 @@ SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 TOKENS_DIR = BASE_DIR / "tokens"
-DB_PATH = BASE_DIR / "app.db"
+DB_PATH = DATA_DIR / "app.db"
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 TOKENS_DIR.mkdir(parents=True, exist_ok=True)
