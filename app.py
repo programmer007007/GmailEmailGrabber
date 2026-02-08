@@ -260,7 +260,10 @@ def gmail_query(start_date, end_date):
     # Gmail search uses dates in YYYY/MM/DD format and interprets them in the account's timezone
     # Include ALL mail: inbox, sent, spam, trash, drafts, etc.
     # {in:anywhere} searches across all folders including spam and trash
-    return f"after:{start.strftime('%Y/%m/%d')} before:{end.strftime('%Y/%m/%d')} in:anywhere"
+    # Filter to only include emails from John, Jason, and Peyton
+    # Note: You may need to update the email addresses to match the actual sender addresses
+    allowed_senders = "(from:john OR from:jason OR from:peyton)"
+    return f"after:{start.strftime('%Y/%m/%d')} before:{end.strftime('%Y/%m/%d')} in:anywhere {allowed_senders}"
 
 
 def parse_email_body(payload):
