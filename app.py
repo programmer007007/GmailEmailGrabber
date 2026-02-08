@@ -256,7 +256,9 @@ def gmail_query(start_date, end_date):
     end = datetime.fromisoformat(end_date) + timedelta(days=1)
 
     # Gmail search uses dates in YYYY/MM/DD format and interprets them in the account's timezone
-    return f"after:{start.strftime('%Y/%m/%d')} before:{end.strftime('%Y/%m/%d')}"
+    # Include ALL mail: inbox, sent, spam, trash, drafts, etc.
+    # {in:anywhere} searches across all folders including spam and trash
+    return f"after:{start.strftime('%Y/%m/%d')} before:{end.strftime('%Y/%m/%d')} in:anywhere"
 
 
 def parse_email_body(payload):
