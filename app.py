@@ -372,6 +372,24 @@ def clean_email_content(text_content, html_content=None):
         # Remove diagnostic information sections
         content = re.sub(r'Diagnostic information for administrators:.*?(?=\n\n|\Z)', '', content, flags=re.DOTALL | re.IGNORECASE)
 
+        # Remove base64-encoded MIME headers (like msip_labels with =?utf-8?B?...)
+        content = re.sub(r'(?:msip_labels|boundary|Content-Type|MIME-Version|charset):\s*=\?utf-8\?[BQ]\?[A-Za-z0-9+/=]+\?=(?:\s+=\?utf-8\?[BQ]\?[A-Za-z0-9+/=]+\?=)*', '', content, flags=re.IGNORECASE)
+
+        # Remove other base64 encoded strings that appear standalone
+        content = re.sub(r'=\?utf-8\?[BQ]\?[A-Za-z0-9+/=]+\?=(?:\s+=\?utf-8\?[BQ]\?[A-Za-z0-9+/=]+\?=)*', '', content, flags=re.IGNORECASE)
+
+        # Remove boundary declarations
+        content = re.sub(r'boundary\s*=\s*"[^"]+";?\s*(?:type\s*=\s*"[^"]+")?', '', content, flags=re.IGNORECASE)
+
+        # Remove separator lines (________________________________ or ----------)
+        content = re.sub(r'^[_\-]{10,}$', '', content, flags=re.MULTILINE)
+
+        # Remove confidentiality disclaimers and legal notices
+        content = re.sub(r'Confidentiality\s*&?\s*Legal\s*Disclaimer:.*?(?=\n\n|\Z)', '', content, flags=re.DOTALL | re.IGNORECASE)
+        content = re.sub(r'This email and any attachments are intended solely for the recipient.*?(?=\n\n|\Z)', '', content, flags=re.DOTALL | re.IGNORECASE)
+        content = re.sub(r'This communication does not constitute an offer.*?(?=\n\n|\Z)', '', content, flags=re.DOTALL | re.IGNORECASE)
+        content = re.sub(r'If you are not the intended recipient.*?delete this message\.?', '', content, flags=re.DOTALL | re.IGNORECASE)
+
         # Remove Microsoft Exchange server headers (long technical headers)
         content = re.sub(r'(?:Received|ARC-Seal|ARC-Message-Signature|ARC-Authentication-Results|DKIM-Signature|X-MS-.*?|x-ms-.*?|authentication-results|x-forefront-.*?):.*?\n(?:\s+.*?\n)*', '', content, flags=re.IGNORECASE)
 
