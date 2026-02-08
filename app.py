@@ -21,12 +21,8 @@ from googleapiclient.discovery import build
 from werkzeug.security import generate_password_hash, check_password_hash
 
 # Professional email cleaning packages
-import talon
-from talon import quotations
+from email_reply_parser import EmailReplyParser
 from cleantext import clean as clean_text_lib
-
-# Initialize talon for ML-based signature detection
-talon.init()
 
 load_dotenv()
 
@@ -338,7 +334,7 @@ def parse_email_body(payload):
 def clean_email_content(text_content, html_content=None):
     """
     Professional email cleaning using battle-tested packages:
-    - talon (Mailgun): ML-based quoted text and signature removal
+    - email-reply-parser: Remove quoted text and signatures
     - clean-text: URL, email address, and special character removal
     - Custom: Email-specific headers and technical junk
 
@@ -363,21 +359,15 @@ def clean_email_content(text_content, html_content=None):
                 print(f"Error converting HTML to text: {e}")
                 content = html_content
 
-        # Step 2: Use talon (Mailgun) to remove quoted text
-        # This is ML-based and very accurate for reply chains
+        # Step 2: Use email-reply-parser to remove quoted text and signatures
+        # This library is used by GitHub and other major platforms
         try:
-            content = quotations.extract_from_plain(content)
+            parsed = EmailReplyParser.parse_reply(content)
+            content = parsed if parsed else content
         except Exception as e:
-            print(f"Talon quotation extraction failed: {e}")
+            print(f"Email reply parser failed: {e}")
 
-        # Step 3: Use talon to remove signatures (ML-based)
-        try:
-            from talon.signature.bruteforce import extract_signature
-            content, signature = extract_signature(content)
-        except Exception as e:
-            print(f"Talon signature extraction failed: {e}")
-
-        # Step 4: Use clean-text to remove URLs, emails, and normalize
+        # Step 3: Use clean-text to remove URLs, emails, and normalize
         try:
             content = clean_text_lib(
                 content,
@@ -396,7 +386,7 @@ def clean_email_content(text_content, html_content=None):
         except Exception as e:
             print(f"Clean-text processing failed: {e}")
 
-        # Step 5: Custom cleaning for email-specific junk
+        # Step 4: Custom cleaning for email-specific junk
         lines = content.split('\n')
         cleaned_lines = []
         seen_lines = set()
