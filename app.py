@@ -19,6 +19,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from werkzeug.security import generate_password_hash, check_password_hash
+from mailparser_reply import EmailReplyParser
 
 load_dotenv()
 
@@ -327,78 +328,107 @@ def parse_email_body(payload):
     }
 
 
-def clean_html_content(html_content):
+def clean_email_content(text_content, html_content=None):
     """
-    Clean and minimize HTML content by:
-    - Removing scripts, styles, links, and unnecessary tags
-    - Stripping inline styles and attributes
-    - Keeping only essential structure (headings, paragraphs, lists)
-    - Extracting readable text content
+    Clean email content using mail-parser-reply to remove:
+    - Email headers, signatures, disclaimers
+    - Quoted reply text
+    - Multi-language support for signature detection
+
+    Tries text first, falls back to HTML if text is empty
     """
-    if not html_content or not html_content.strip():
+    if not text_content and not html_content:
         return ""
 
     try:
-        soup = BeautifulSoup(html_content, 'html.parser')
+        # Prefer text content if available
+        content_to_parse = text_content if text_content else html_content
 
-        # Remove unwanted tags completely (including links)
-        for tag in soup(['script', 'style', 'meta', 'link', 'noscript', 'iframe', 'embed', 'object', 'a']):
-            tag.decompose()
+        # If we're parsing HTML, convert it to text first
+        if not text_content and html_content:
+            try:
+                soup = BeautifulSoup(html_content, 'html.parser')
+                # Remove unwanted tags
+                for tag in soup(['script', 'style', 'meta', 'link', 'noscript', 'iframe', 'embed', 'object']):
+                    tag.decompose()
+                content_to_parse = soup.get_text(separator='\n', strip=True)
+            except Exception as e:
+                print(f"Error converting HTML to text: {e}")
+                content_to_parse = html_content
 
-        # Remove comments
-        for comment in soup.findAll(text=lambda text: isinstance(text, str) and text.strip().startswith('<!--')):
-            comment.extract()
+        # Parse with mail-parser-reply
+        # Support multiple languages for better signature detection
+        parser = EmailReplyParser(languages=['en', 'de', 'es', 'fr', 'it'])
+        email_message = parser.read(text=content_to_parse)
 
-        # Remove all attributes except src for images
-        for tag in soup.find_all(True):
-            # Keep only essential attributes for images
-            if tag.name == 'img' and tag.has_attr('src'):
-                attrs = {'src': tag['src']}
-                if tag.has_attr('alt'):
-                    attrs['alt'] = tag['alt']
-                tag.attrs = attrs
-            else:
-                tag.attrs = {}
+        # Get all replies without signatures and headers
+        cleaned_parts = []
+        for reply in email_message.replies:
+            # reply.body excludes headers, signatures, and disclaimers
+            if reply.body and reply.body.strip():
+                cleaned_parts.append(reply.body.strip())
 
-        # Get cleaned HTML
-        cleaned = str(soup)
+        # Join all reply parts
+        result = '\n\n'.join(cleaned_parts)
 
-        # Remove excessive whitespace
-        cleaned = re.sub(r'\n\s*\n', '\n\n', cleaned)
-        cleaned = re.sub(r' +', ' ', cleaned)
+        # Additional cleaning for technical noise
+        lines = result.split('\n')
+        cleaned_lines = []
+        seen_lines = set()
 
-        # Further minimize: extract just text with basic structure
-        text_parts = []
-        for element in soup.find_all(['p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'span', 'strong', 'em', 'br']):
-            text = element.get_text(strip=True)
-            if text:
-                if element.name in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']:
-                    text_parts.append(f"\n## {text}\n")
-                elif element.name in ['p', 'div']:
-                    text_parts.append(f"{text}\n")
-                elif element.name == 'li':
-                    text_parts.append(f"• {text}")
-                else:
-                    text_parts.append(text)
+        # Patterns for remaining technical junk
+        skip_patterns = [
+            r'^Received:\s+from',
+            r'^X-.*:',
+            r'^ARC-.*:',
+            r'^Content-Type:',
+            r'^\s*=\?utf-8\?[BQ]\?',  # Encoded headers
+            r'\b[A-Za-z0-9+/]{50,}={0,2}\b',  # Long base64 strings
+            r'http[s]?://calendar\.google\.com',
+            r'http[s]?://meet\.google\.com',
+            r'Microsoft SMTP Server',
+            r'Original message headers:',
+        ]
 
-        if text_parts:
-            result = ' '.join(text_parts)
-            # Clean up extra spaces and newlines
-            result = re.sub(r'\n{3,}', '\n\n', result)
-            result = re.sub(r' +', ' ', result)
-            return result.strip()
+        for line in lines:
+            line = line.strip()
+            if not line or len(line) < 3:
+                continue
 
-        # Fallback: just get all text
-        return soup.get_text(separator=' ', strip=True)
+            # Skip technical patterns
+            skip = False
+            for pattern in skip_patterns:
+                if re.search(pattern, line, re.IGNORECASE):
+                    skip = True
+                    break
+
+            if skip:
+                continue
+
+            # Remove duplicates
+            line_normalized = re.sub(r'\s+', ' ', line.lower())
+            if line_normalized in seen_lines:
+                continue
+
+            seen_lines.add(line_normalized)
+            cleaned_lines.append(line)
+
+        result = '\n'.join(cleaned_lines)
+        result = re.sub(r'\n{3,}', '\n\n', result)
+
+        return result.strip()
 
     except Exception as e:
-        print(f"Error cleaning HTML: {e}")
-        # If cleaning fails, return plain text extraction
-        try:
-            soup = BeautifulSoup(html_content, 'html.parser')
-            return soup.get_text(separator=' ', strip=True)
-        except:
-            return html_content
+        print(f"Error cleaning email content: {e}")
+        # Fallback to basic cleaning if parser fails
+        content = text_content if text_content else html_content
+        if html_content and not text_content:
+            try:
+                soup = BeautifulSoup(html_content, 'html.parser')
+                content = soup.get_text(separator='\n', strip=True)
+            except:
+                pass
+        return content
 
 
 def insert_batch(conn, user_id, start_date, end_date, status, callback_url=None, gmail_account=None):
@@ -521,10 +551,11 @@ def extract_batch(batch_id, user_id, start_date, end_date):
                         # Parse email body
                         body_data = parse_email_body(full_msg.get("payload", {}))
 
-                        # Clean HTML to save space - extract just the content
-                        cleaned_html = clean_html_content(body_data["html"]) if body_data["html"] else ""
+                        # Clean email content using professional mail-parser-reply package
+                        # This removes signatures, disclaimers, headers, and quoted text
+                        cleaned_content = clean_email_content(body_data["text"], body_data["html"])
 
-                        # Build record with full content
+                        # Build record with cleaned content
                         record = {
                             "id": msg_id,
                             "threadId": full_msg.get("threadId"),
@@ -536,8 +567,8 @@ def extract_batch(batch_id, user_id, start_date, end_date):
                             "bcc": headers.get("bcc", ""),
                             "date": headers.get("date", ""),
                             "snippet": full_msg.get("snippet", ""),
-                            "body_text": body_data["text"],
-                            "body_html": cleaned_html,  # Store cleaned HTML (much smaller)
+                            "body_text": cleaned_content,  # Store cleaned content (no signatures/headers)
+                            "body_html": "",  # We store cleaned text only to save space
                             "attachments": body_data["attachments"],
                             "labels": full_msg.get("labelIds", []),
                         }
