@@ -19,7 +19,14 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from werkzeug.security import generate_password_hash, check_password_hash
-from mailparser_reply import EmailReplyParser
+
+# Professional email cleaning packages
+import talon
+from talon import quotations
+from cleantext import clean as clean_text_lib
+
+# Initialize talon for ML-based signature detection
+talon.init()
 
 load_dotenv()
 
@@ -330,19 +337,19 @@ def parse_email_body(payload):
 
 def clean_email_content(text_content, html_content=None):
     """
-    Clean email content using mail-parser-reply to remove:
-    - Email headers, signatures, disclaimers
-    - Quoted reply text
-    - Multi-language support for signature detection
+    Professional email cleaning using battle-tested packages:
+    - talon (Mailgun): ML-based quoted text and signature removal
+    - clean-text: URL, email address, and special character removal
+    - Custom: Email-specific headers and technical junk
 
-    Tries text first, falls back to HTML if text is empty
+    Returns clean, LLM-ready text
     """
     if not text_content and not html_content:
         return ""
 
     try:
-        # Prefer text content if available
-        content_to_parse = text_content if text_content else html_content
+        # Step 1: Get text content
+        content = text_content if text_content else html_content
 
         # If we're parsing HTML, convert it to text first
         if not text_content and html_content:
@@ -351,51 +358,83 @@ def clean_email_content(text_content, html_content=None):
                 # Remove unwanted tags
                 for tag in soup(['script', 'style', 'meta', 'link', 'noscript', 'iframe', 'embed', 'object']):
                     tag.decompose()
-                content_to_parse = soup.get_text(separator='\n', strip=True)
+                content = soup.get_text(separator='\n', strip=True)
             except Exception as e:
                 print(f"Error converting HTML to text: {e}")
-                content_to_parse = html_content
+                content = html_content
 
-        # Parse with mail-parser-reply
-        # Support multiple languages for better signature detection
-        parser = EmailReplyParser(languages=['en', 'de', 'es', 'fr', 'it'])
-        email_message = parser.read(text=content_to_parse)
+        # Step 2: Use talon (Mailgun) to remove quoted text
+        # This is ML-based and very accurate for reply chains
+        try:
+            content = quotations.extract_from_plain(content)
+        except Exception as e:
+            print(f"Talon quotation extraction failed: {e}")
 
-        # Get all replies without signatures and headers
-        cleaned_parts = []
-        for reply in email_message.replies:
-            # reply.body excludes headers, signatures, and disclaimers
-            if reply.body and reply.body.strip():
-                cleaned_parts.append(reply.body.strip())
+        # Step 3: Use talon to remove signatures (ML-based)
+        try:
+            from talon.signature.bruteforce import extract_signature
+            content, signature = extract_signature(content)
+        except Exception as e:
+            print(f"Talon signature extraction failed: {e}")
 
-        # Join all reply parts
-        result = '\n\n'.join(cleaned_parts)
+        # Step 4: Use clean-text to remove URLs, emails, and normalize
+        try:
+            content = clean_text_lib(
+                content,
+                fix_unicode=True,               # Fix unicode errors
+                to_ascii=False,                 # Keep unicode chars (emojis, etc.)
+                lower=False,                    # Keep original case
+                no_urls=True,                   # Remove URLs
+                no_emails=True,                 # Remove email addresses
+                no_phone_numbers=True,          # Remove phone numbers
+                no_currency_symbols=False,      # Keep currency symbols
+                no_punct=False,                 # Keep punctuation
+                replace_with_url="",            # Replace URLs with empty string
+                replace_with_email="",          # Replace emails with empty string
+                replace_with_phone_number="",   # Replace phones with empty string
+            )
+        except Exception as e:
+            print(f"Clean-text processing failed: {e}")
 
-        # Additional cleaning for technical noise
-        lines = result.split('\n')
+        # Step 5: Custom cleaning for email-specific junk
+        lines = content.split('\n')
         cleaned_lines = []
         seen_lines = set()
 
-        # Patterns for remaining technical junk
+        # Patterns for email-specific technical junk
         skip_patterns = [
+            r'^(From|To|Cc|Bcc|Subject|Date|Sent|Reply-To|Return-Path|Message-ID|Thread-Index):',
             r'^Received:\s+from',
             r'^X-.*:',
             r'^ARC-.*:',
+            r'^DKIM-.*:',
             r'^Content-Type:',
-            r'^\s*=\?utf-8\?[BQ]\?',  # Encoded headers
-            r'\b[A-Za-z0-9+/]{50,}={0,2}\b',  # Long base64 strings
-            r'http[s]?://calendar\.google\.com',
-            r'http[s]?://meet\.google\.com',
+            r'^MIME-Version:',
+            r'^\s*=\?utf-8\?[BQ]\?',
+            r'Delivery has failed',
+            r'Your message couldn.*t be delivered',
+            r'DNS query failed',
+            r'Diagnostic information for administrators',
             r'Microsoft SMTP Server',
+            r'version=TLS',
+            r'cipher=',
+            r'\b[A-Za-z0-9+/]{50,}={0,2}\b',  # Base64
+            r'authentication-results:',
+            r'x-ms-exchange-',
             r'Original message headers:',
+            r'\[cid:[^\]]+\]',  # CID references
+            r'Confidentiality & Legal Disclaimer',
+            r'Caution:.*external email',
         ]
 
         for line in lines:
             line = line.strip()
+
+            # Skip empty or very short lines
             if not line or len(line) < 3:
                 continue
 
-            # Skip technical patterns
+            # Skip lines matching technical patterns
             skip = False
             for pattern in skip_patterns:
                 if re.search(pattern, line, re.IGNORECASE):
@@ -403,6 +442,15 @@ def clean_email_content(text_content, html_content=None):
                     break
 
             if skip:
+                continue
+
+            # Remove remaining artifacts
+            line = re.sub(r'\[cid:[^\]]+\]', '', line)
+            line = re.sub(r'_{10,}', '', line)  # Long underscores
+            line = re.sub(r'\s+', ' ', line).strip()
+
+            # Skip if now empty or just special chars
+            if not line or len(line) < 3 or re.match(r'^[^a-zA-Z0-9]+$', line):
                 continue
 
             # Remove duplicates
@@ -420,15 +468,12 @@ def clean_email_content(text_content, html_content=None):
 
     except Exception as e:
         print(f"Error cleaning email content: {e}")
-        # Fallback to basic cleaning if parser fails
+        # Fallback: return original with basic cleanup
         content = text_content if text_content else html_content
-        if html_content and not text_content:
-            try:
-                soup = BeautifulSoup(html_content, 'html.parser')
-                content = soup.get_text(separator='\n', strip=True)
-            except:
-                pass
-        return content
+        if content:
+            # At minimum, strip URLs
+            content = re.sub(r'https?://[^\s<>]+', '', content)
+        return content if content else ""
 
 
 def insert_batch(conn, user_id, start_date, end_date, status, callback_url=None, gmail_account=None):
