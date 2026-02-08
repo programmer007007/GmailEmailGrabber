@@ -838,12 +838,52 @@ def api_request():
     data = request.get_json(silent=True) or {}
     start_date, end_date = normalize_dates(data.get("start_date"), data.get("end_date"))
     callback_url = data.get("callback_url")
+    refetch = data.get("refetch", False)
 
     # Get current Gmail account for duplicate check
     gmail_account = get_gmail_email(user["id"])
 
     conn = db()
     existing = find_completed_batch(conn, user["id"], start_date, end_date, gmail_account)
+
+    # If refetch is True, delete old emails and reset the batch
+    if existing and refetch:
+        cur = conn.cursor()
+        batch_id = existing["id"]
+
+        # Delete old emails associated with this batch
+        cur.execute("DELETE FROM emails WHERE batch_id = ?", (batch_id,))
+
+        # Reset the batch status to queued
+        cur.execute(
+            """
+            UPDATE email_batches
+            SET status = 'queued',
+                total_messages = 0,
+                processed_messages = 0,
+                estimated_total = 0,
+                error_message = NULL,
+                completed_at = NULL
+            WHERE id = ?
+            """,
+            (batch_id,)
+        )
+        conn.commit()
+        conn.close()
+
+        # Start the extraction using the existing batch
+        start_extraction(user["id"], start_date, end_date, callback_url=callback_url, batch_id=batch_id)
+
+        return jsonify(
+            {
+                "status": "queued",
+                "batch_id": batch_id,
+                "start_date": start_date,
+                "end_date": end_date,
+                "callback_url": callback_url,
+                "refetched": True
+            }
+        )
 
     if existing:
         # Fetch the actual email messages from the database
