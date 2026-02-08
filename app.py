@@ -334,6 +334,9 @@ def clean_email_content(text_content, html_content=None):
     Simple email cleaning for LLM:
     - Use plain text from Gmail (already clean)
     - Strip ALL URLs
+    - Remove Microsoft Outlook diagnostic information
+    - Remove email headers and metadata
+    - Remove unsubscribe messages
     - If no text, extract from HTML
     - That's it - keep it simple!
     """
@@ -359,6 +362,35 @@ def clean_email_content(text_content, html_content=None):
         if not content:
             return ""
 
+        # Remove Microsoft Outlook delivery failure messages
+        # Match lines starting with "Delivery has failed" and everything until original message headers
+        content = re.sub(r'Delivery has failed to these recipients.*?Original message headers:', '', content, flags=re.DOTALL | re.IGNORECASE)
+
+        # Remove "Undeliverable:" subject lines
+        content = re.sub(r'Undeliverable:.*?\n', '', content, flags=re.IGNORECASE)
+
+        # Remove diagnostic information sections
+        content = re.sub(r'Diagnostic information for administrators:.*?(?=\n\n|\Z)', '', content, flags=re.DOTALL | re.IGNORECASE)
+
+        # Remove Microsoft Exchange server headers (long technical headers)
+        content = re.sub(r'(?:Received|ARC-Seal|ARC-Message-Signature|ARC-Authentication-Results|DKIM-Signature|X-MS-.*?|x-ms-.*?|authentication-results|x-forefront-.*?):.*?\n(?:\s+.*?\n)*', '', content, flags=re.IGNORECASE)
+
+        # Remove email metadata blocks (From:, Sent:, To:, Subject: patterns in forwarded/replied emails)
+        # This matches the pattern of email headers that appear in forwarded messages
+        content = re.sub(r'-{10,}.*?(?:From|Sent|To|Subject|Date|Cc|Bcc):.*?(?=\n\n|\Z)', '', content, flags=re.DOTALL | re.IGNORECASE)
+
+        # Remove standalone email header lines (more aggressive)
+        content = re.sub(r'^\s*(?:From|Sent|To|Subject|Date|Cc|Bcc|Reply-To|Received|Return-Path|Message-ID|Thread-Topic|Thread-Index|Accept-Language|Content-Language|Content-Type|MIME-Version|X-.*?|In-Reply-To|References):\s*.*?$', '', content, flags=re.MULTILINE | re.IGNORECASE)
+
+        # Remove unsubscribe messages and similar footer patterns
+        content = re.sub(r'If you (?:don\'t want to receive|no longer wish to receive|would like to unsubscribe from).*?(?:unsubscribe|future).*?\.', '', content, flags=re.DOTALL | re.IGNORECASE)
+        content = re.sub(r'To unsubscribe.*?(?:\n|\.)', '', content, flags=re.IGNORECASE)
+        content = re.sub(r'Click here to unsubscribe.*?(?:\n|\.)', '', content, flags=re.IGNORECASE)
+        content = re.sub(r'Unsubscribe from .*?(?:\n|\.)', '', content, flags=re.IGNORECASE)
+
+        # Remove "Let's Meet:" scheduling links
+        content = re.sub(r'Let\'s Meet:\s*Schedule a time.*?(?:\n|\.)', '', content, flags=re.IGNORECASE)
+
         # Strip ALL URLs (http, https, with or without brackets)
         content = re.sub(r'https?://[^\s<>\)]+', '', content)
         content = re.sub(r'<https?://[^\s>]+>', '', content)
@@ -375,10 +407,16 @@ def clean_email_content(text_content, html_content=None):
         # Clean up multiple spaces
         content = re.sub(r'\s+', ' ', content)
 
-        # Clean up multiple newlines
+        # Clean up multiple newlines (more than 2)
         content = re.sub(r'\n{3,}', '\n\n', content)
 
-        return content.strip()
+        # Remove leading/trailing whitespace from each line
+        content = '\n'.join(line.strip() for line in content.split('\n'))
+
+        # Remove any remaining empty lines at start/end
+        content = content.strip()
+
+        return content
 
     except Exception as e:
         print(f"Error cleaning email: {e}")
