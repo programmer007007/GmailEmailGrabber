@@ -10,6 +10,7 @@ services:
       - ./data:/app/data
       - ./tokens:/app/tokens
       - ./credentials.json:/app/credentials.json
+      - ./.env:/app/.env
     environment:
       - APP_SECRET=${APP_SECRET:-dev-secret-change-in-production}
       - ADMIN_USER=${ADMIN_USER:-admin}

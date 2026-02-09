@@ -203,12 +203,9 @@ def load_credentials(user_id):
 
 
 def get_flow():
-    # Use hardcoded production URL in production, auto-detect in dev
-    if ENVIRONMENT == "production":
-        redirect_uri = f"{BASE_URL}/oauth2callback"
-    else:
-        redirect_uri = url_for("oauth2callback", _external=True)
-    
+    redirect_uri = f"{BASE_URL}/oauth2callback"
+    print(f"[OAuth Debug] BASE_URL: {BASE_URL}")
+    print(f"[OAuth Debug] redirect_uri: {redirect_uri}")
     return Flow.from_client_secrets_file(
         GOOGLE_CLIENT_SECRET,
         scopes=SCOPES,
