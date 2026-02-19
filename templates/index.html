@@ -223,6 +223,9 @@
       <div>Gmail Mail Grabber - {{ user['username'] }}</div>
       <div class="top-actions">
         <a class="button" href="{{ url_for('profile') }}">Profile & API Key</a>
+        {% if user['is_admin'] %}
+        <a class="button" href="{{ url_for('blocked_ips') }}">IP Blocks</a>
+        {% endif %}
         {% if not user['gmail_connected'] %}
         <a class="button" href="{{ url_for('auth_google') }}">Connect Google</a>
         {% endif %}

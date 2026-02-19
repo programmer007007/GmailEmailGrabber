@@ -25,6 +25,9 @@
       <div>Gmail Mail Grabber</div>
       <div class="top-actions">
         <a class="button" href="{{ url_for('index') }}">Dashboard</a>
+        {% if user['is_admin'] %}
+        <a class="button" href="{{ url_for('blocked_ips') }}">IP Blocks</a>
+        {% endif %}
         <a class="button" href="{{ url_for('logout') }}">Logout</a>
       </div>
     </header>

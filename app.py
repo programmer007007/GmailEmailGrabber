@@ -63,6 +63,90 @@ app.wsgi_app = ProxyFix(
 # Reduce OAuthlib warning for local dev when using http://localhost
 os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
 
+# Basic IP blocking for repeated 404s
+BLOCKED_IPS_FILE = Path(os.getenv("BLOCKED_IPS_FILE", str(DATA_DIR / "blocked_ips.txt")))
+BLOCK_404_THRESHOLD = int(os.getenv("BLOCK_404_THRESHOLD", "3"))
+BLOCK_404_WINDOW_SECONDS = int(os.getenv("BLOCK_404_WINDOW_SECONDS", "120"))
+
+_blocked_ips = set()
+_block_lock = threading.Lock()
+_consecutive_404 = {}
+
+
+def _load_blocked_ips():
+    if not BLOCKED_IPS_FILE.exists():
+        return
+    try:
+        for line in BLOCKED_IPS_FILE.read_text(encoding="utf-8").splitlines():
+            ip = line.strip()
+            if ip:
+                _blocked_ips.add(ip)
+    except Exception as e:
+        print(f"Failed to read blocked IPs file: {e}")
+
+
+def _save_blocked_ip(ip):
+    try:
+        BLOCKED_IPS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with BLOCKED_IPS_FILE.open("a", encoding="utf-8") as f:
+            f.write(f"{ip}\n")
+    except Exception as e:
+        print(f"Failed to write blocked IP: {e}")
+
+
+def _write_blocked_ips():
+    try:
+        BLOCKED_IPS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with BLOCKED_IPS_FILE.open("w", encoding="utf-8") as f:
+            for ip in sorted(_blocked_ips):
+                f.write(f"{ip}\n")
+    except Exception as e:
+        print(f"Failed to rewrite blocked IPs file: {e}")
+
+
+def _get_client_ip():
+    # ProxyFix populates request.access_route from X-Forwarded-For.
+    if request.access_route:
+        return request.access_route[0]
+    return request.remote_addr or "unknown"
+
+
+def _track_404(ip):
+    now = time.time()
+    record = _consecutive_404.get(ip)
+    if not record:
+        _consecutive_404[ip] = {"count": 1, "last": now}
+        return 1
+
+    if now - record["last"] > BLOCK_404_WINDOW_SECONDS:
+        record["count"] = 1
+    else:
+        record["count"] += 1
+    record["last"] = now
+    return record["count"]
+
+
+def _reset_404(ip):
+    _consecutive_404.pop(ip, None)
+
+
+def _prune_404():
+    now = time.time()
+    stale = [ip for ip, rec in _consecutive_404.items() if now - rec["last"] > BLOCK_404_WINDOW_SECONDS]
+    for ip in stale:
+        _consecutive_404.pop(ip, None)
+
+
+_load_blocked_ips()
+
+
+@app.before_request
+def block_bad_ips():
+    ip = _get_client_ip()
+    with _block_lock:
+        if ip in _blocked_ips:
+            abort(403)
+
 
 def db():
     conn = sqlite3.connect(DB_PATH)
@@ -153,6 +237,17 @@ def login_required(fn):
     def wrapper(*args, **kwargs):
         if not session.get("user_id"):
             return redirect(url_for("login"))
+        return fn(*args, **kwargs)
+    wrapper.__name__ = fn.__name__
+    return wrapper
+
+
+def admin_required(fn):
+    def wrapper(*args, **kwargs):
+        if not session.get("user_id"):
+            return redirect(url_for("login"))
+        if not session.get("is_admin"):
+            abort(403)
         return fn(*args, **kwargs)
     wrapper.__name__ = fn.__name__
     return wrapper
@@ -255,12 +350,12 @@ def gmail_query(start_date, end_date):
     end = datetime.fromisoformat(end_date) + timedelta(days=1)
 
     # Gmail search uses dates in YYYY/MM/DD format and interprets them in the account's timezone
-    # Include ALL mail: inbox, sent, spam, trash, drafts, etc.
-    # {in:anywhere} searches across all folders including spam and trash
-    # Filter to only include emails from John, Jason, and Peyton
-    # Note: You may need to update the email addresses to match the actual sender addresses
-    allowed_senders = "(from:john OR from:jason OR from:peyton)"
-    return f"after:{start.strftime('%Y/%m/%d')} before:{end.strftime('%Y/%m/%d')} in:anywhere {allowed_senders}"
+    # Search inbox, sent, and spam folders only (exclude trash and drafts)
+    # -in:trash excludes trash, -in:drafts excludes drafts
+    # Filter to include ALL emails involving John, Jason, and Peyton (from, to, cc, bcc)
+    # Using {} syntax to match any involvement of these email addresses
+    allowed_senders = "{john@thedoctorgroup.com jason@thedoctorgroup.com peyton@thedoctorgroup.com}"
+    return f"after:{start.strftime('%Y/%m/%d')} before:{end.strftime('%Y/%m/%d')} -in:trash -in:drafts {allowed_senders}"
 
 
 def parse_email_body(payload):
@@ -748,6 +843,49 @@ def disconnect_gmail():
     return redirect(url_for("profile"))
 
 
+@app.route("/blocked-ips", methods=["GET", "POST"])
+@admin_required
+def blocked_ips():
+    user = get_current_user()
+    message = None
+    error = None
+
+    if request.method == "POST":
+        action = request.form.get("action", "")
+        ip = (request.form.get("ip") or "").strip()
+        if action not in ["block", "unblock"]:
+            error = "Invalid action."
+        elif not ip:
+            error = "IP is required."
+        else:
+            with _block_lock:
+                if action == "block":
+                    _blocked_ips.add(ip)
+                    _save_blocked_ip(ip)
+                    message = f"Blocked {ip}."
+                else:
+                    if ip in _blocked_ips:
+                        _blocked_ips.discard(ip)
+                        _write_blocked_ips()
+                        message = f"Unblocked {ip}."
+                    else:
+                        error = f"{ip} is not currently blocked."
+
+    with _block_lock:
+        blocked_list = sorted(_blocked_ips)
+
+    return render_template(
+        "blocked_ips.html",
+        user=user,
+        blocked_ips=blocked_list,
+        message=message,
+        error=error,
+        threshold=BLOCK_404_THRESHOLD,
+        window_seconds=BLOCK_404_WINDOW_SECONDS,
+        blocked_file=str(BLOCKED_IPS_FILE),
+    )
+
+
 @app.route("/")
 @login_required
 def index():
@@ -1087,6 +1225,26 @@ def batch_messages(batch_id):
         'batch_info': dict(batch),
         'messages': messages_list
     })
+
+
+@app.after_request
+def maybe_block_after_404(response):
+    try:
+        if response.status_code == 404:
+            ip = _get_client_ip()
+            with _block_lock:
+                if ip not in _blocked_ips:
+                    count = _track_404(ip)
+                    if count >= BLOCK_404_THRESHOLD:
+                        _blocked_ips.add(ip)
+                        _save_blocked_ip(ip)
+        else:
+            ip = _get_client_ip()
+            _reset_404(ip)
+        _prune_404()
+    except Exception as e:
+        print(f"IP block tracking error: {e}")
+    return response
 
 
 if __name__ == "__main__":

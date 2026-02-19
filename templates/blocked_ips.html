@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Blocked IPs - Gmail Mail Grabber</title>
+    <style>
+      body { font-family: "Palatino Linotype", serif; background: #f2f0ea; margin: 0; padding: 0; }
+      header { background: #2e3a2f; color: #fff; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+      main { max-width: 900px; margin: 24px auto; padding: 0 16px 32px; }
+      .card { background: #fff; border: 1px solid #e0d8cd; padding: 20px; margin-bottom: 16px; }
+      h1, h2 { margin: 0 0 12px; }
+      label { display: block; margin: 8px 0 4px; font-weight: bold; }
+      input { padding: 8px; border: 1px solid #c9c3b8; }
+      button, a.button { padding: 8px 12px; background: #6d4c41; color: #fff; border: none; text-decoration: none; cursor: pointer; display: inline-block; }
+      .top-actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+      .info-text { font-size: 14px; color: #666; margin-top: 8px; }
+      .notice { padding: 10px 12px; border-radius: 4px; margin-bottom: 12px; }
+      .notice-success { background: #e6f4ea; color: #1e4620; border: 1px solid #b7e0c1; }
+      .notice-error { background: #fdecea; color: #611a15; border: 1px solid #f5c6cb; }
+      .blocked-list { list-style: none; padding: 0; margin: 0; }
+      .blocked-item { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #eee; padding: 8px 0; }
+      .blocked-ip { font-family: monospace; }
+      .inline-form { display: inline; margin: 0; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div>Gmail Mail Grabber - Admin</div>
+      <div class="top-actions">
+        <a class="button" href="{{ url_for('index') }}">Dashboard</a>
+        <a class="button" href="{{ url_for('profile') }}">Profile</a>
+        <a class="button" href="{{ url_for('logout') }}">Logout</a>
+      </div>
+    </header>
+    <main>
+      <div class="card">
+        <h2>IP Blocking Rules</h2>
+        <p class="info-text">Auto-block after {{ threshold }} 404s within {{ window_seconds }} seconds.</p>
+        <p class="info-text">Blocklist file: {{ blocked_file }}</p>
+      </div>
+
+      <div class="card">
+        <h2>Block / Unblock IP</h2>
+        {% if message %}
+          <div class="notice notice-success">{{ message }}</div>
+        {% endif %}
+        {% if error %}
+          <div class="notice notice-error">{{ error }}</div>
+        {% endif %}
+        <form method="post" action="{{ url_for('blocked_ips') }}">
+          <label for="ip">IP address</label>
+          <input id="ip" name="ip" type="text" placeholder="e.g., 203.0.113.45" />
+          <div style="margin-top: 12px;">
+            <button type="submit" name="action" value="block">Block</button>
+            <button type="submit" name="action" value="unblock" style="background:#d32f2f;">Unblock</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>Blocked IPs ({{ blocked_ips | length }})</h2>
+        {% if blocked_ips %}
+          <ul class="blocked-list">
+            {% for ip in blocked_ips %}
+            <li class="blocked-item">
+              <span class="blocked-ip">{{ ip }}</span>
+              <form class="inline-form" method="post" action="{{ url_for('blocked_ips') }}">
+                <input type="hidden" name="ip" value="{{ ip }}" />
+                <button type="submit" name="action" value="unblock" style="background:#d32f2f;">Unblock</button>
+              </form>
+            </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="info-text">No blocked IPs.</p>
+        {% endif %}
+      </div>
+    </main>
+  </body>
+</html>
